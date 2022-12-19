@@ -2,9 +2,11 @@ package etcd
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
 	"github.com/panhow/etcd-proxy/util"
 	"go.uber.org/zap"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"strings"
@@ -12,6 +14,7 @@ import (
 )
 
 type HTTPClient struct {
+	tlsConfig   *tls.Config
 	count       int64
 	endpoints   []string
 	cli         *http.Client
@@ -25,21 +28,10 @@ type Result struct {
 	Error  error
 }
 
-func NewHTTPClient(endpoints []string) *HTTPClient {
-	c := &http.Client{
-		Transport: &http.Transport{
-			MaxIdleConns:        0, // no limit
-			MaxIdleConnsPerHost: 128,
-			MaxConnsPerHost:     0, // no limit
-			IdleConnTimeout:     0, // no limit
-		},
-		Jar:     &cookiejar.Jar{},
-		Timeout: 0,
-	}
+func NewHTTPClient(endpoints []string, options ...Option) *HTTPClient {
 	index := 0
-	return &HTTPClient{
+	cli := &HTTPClient{
 		count:     0,
-		cli:       c,
 		endpoints: endpoints,
 		getEndpoint: func() string {
 			e := endpoints[index]
@@ -47,10 +39,31 @@ func NewHTTPClient(endpoints []string) *HTTPClient {
 			return e
 		},
 	}
+
+	for _, option := range options {
+		err := option(cli)
+		if err != nil {
+			panic(fmt.Sprintf("init etcd http client failed: %v", err))
+		}
+	}
+
+	cli.cli = &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        0, // no limit
+			MaxIdleConnsPerHost: 128,
+			MaxConnsPerHost:     0, // no limit
+			IdleConnTimeout:     0, // no limit
+			TLSClientConfig:     cli.tlsConfig,
+		},
+		Jar:     &cookiejar.Jar{},
+		Timeout: 0,
+	}
+
+	return cli
 }
 
-func (c *HTTPClient) Do(r *http.Request) (int, http.Header, []byte, error) {
-	var fail = func(err error) (int, http.Header, []byte, error) { return 0, nil, nil, err }
+func (c *HTTPClient) Do(r *http.Request) (int, http.Header, io.Reader, error) {
+	var fail = func(err error) (int, http.Header, io.Reader, error) { return 0, nil, nil, err }
 	outR := r.Clone(context.Background())
 
 	if outR.URL.Scheme == "" {
@@ -95,12 +108,11 @@ func (c *HTTPClient) Do(r *http.Request) (int, http.Header, []byte, error) {
 	statusCode := res.StatusCode
 	header := http.Header{}
 	util.CopyHeader(header, res.Header)
-	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-
+		return fail(err)
 	}
 
-	return statusCode, header, body, nil
+	return statusCode, header, res.Body, nil
 }
 
 // removeConnectionHeaders removes hop-by-hop headers listed in the "Connection" header of h.

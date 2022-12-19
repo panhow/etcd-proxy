@@ -68,7 +68,7 @@ func direct(writer http.ResponseWriter, request *http.Request, retry int) {
 	var (
 		code   int
 		header http.Header
-		body   []byte
+		body   io.Reader
 		err    error
 	)
 	for i := 0; i < 2*retry; i++ {
@@ -85,8 +85,7 @@ func direct(writer http.ResponseWriter, request *http.Request, retry int) {
 
 	util.CopyHeader(writer.Header(), header)
 	writer.WriteHeader(code)
-	bytesReader := bytes.NewReader(body)
-	_, _ = io.Copy(writer, bytesReader)
+	_, _ = io.Copy(writer, body)
 }
 
 func main() {
