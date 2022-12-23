@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
+	"fmt"
 	"github.com/panhow/etcd-proxy/etcd"
 	"github.com/panhow/etcd-proxy/util"
 	"github.com/panhow/etcd-proxy/watch"
@@ -9,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -18,13 +22,16 @@ var (
 )
 
 var (
-	endpoints       = flag.String("endpoints", "http://127.0.0.1:2379", "etcd endpoints be proxied")
-	etcdApiV3       = flag.Bool("etcdv3", false, "default false(means api v2)")
-	clientTlsEnable = flag.Bool("clientTlsEnable", false, "diabled by default,"+
+	listen    = flag.String("listen", ":5678", "etcd proxy listen addrs")
+	endpoints = flag.String("endpoints", "http://127.0.0.1:2379", "etcd endpoints be proxied")
+	etcdApiV3 = flag.Bool("etcdv3", false, "default false(means api v2)")
+
+	serverTlsEnable = flag.Bool("serverTlsEnable", false, "default disable by default")
+	clientTlsEnable = flag.Bool("clientTlsEnable", false, "default disabled by default,"+
 		"if enabled, should use with `cacert`,`cert`,`key` flag")
-	clientCaCert = flag.String("cacert", "", "")
-	clientCert   = flag.String("cert", "", "")
-	clientKey    = flag.String("key", "", "")
+	caCert = flag.String("cacert", "", "")
+	cert   = flag.String("cert", "", "")
+	key    = flag.String("key", "", "")
 )
 
 func init() {
@@ -90,7 +97,7 @@ func direct(writer http.ResponseWriter, request *http.Request, retry int) {
 	var (
 		code   int
 		header http.Header
-		body   io.Reader
+		body   io.ReadCloser
 		err    error
 	)
 	for i := 0; i < 2*retry; i++ {
@@ -111,6 +118,7 @@ func direct(writer http.ResponseWriter, request *http.Request, retry int) {
 	if err != nil {
 		util.Logger.Error("write response failed", zap.Error(err))
 	}
+	_ = body.Close()
 }
 
 func main() {
@@ -118,7 +126,7 @@ func main() {
 
 	options := make([]etcd.Option, 0, 0)
 	if *clientTlsEnable {
-		options = append(options, etcd.WithClientTlsConfig(*clientCert, *clientKey, *clientCaCert))
+		options = append(options, etcd.WithClientTlsConfig(*cert, *key, *caCert))
 	}
 	if *etcdApiV3 {
 		options = append(options, etcd.WithEtcdV3Api())
@@ -136,5 +144,43 @@ func main() {
 			direct(w, r, strings.Count(*endpoints, ",")+1)
 		}
 	})
-	log.Fatal(http.ListenAndServe(":5678", nil))
+	server := http.Server{
+		Addr:      *listen,
+		TLSConfig: buildTlsConfigFromFlag(),
+	}
+	var err error
+	if *serverTlsEnable {
+		err = server.ListenAndServeTLS(*cert, *key)
+	} else {
+		err = server.ListenAndServe()
+	}
+	log.Fatal(err)
+}
+
+func buildTlsConfigFromFlag() *tls.Config {
+	certBytes, err := os.ReadFile(*cert)
+	if err != nil {
+		panic(fmt.Sprintf("parse cert failed, err: %+v", err))
+	}
+	keyBytes, err := os.ReadFile(*key)
+	if err != nil {
+		panic(fmt.Sprintf("parse key failed, err: %+v", err))
+	}
+	caCertBytes, err := os.ReadFile(*caCert)
+	if err != nil {
+		panic(fmt.Sprintf("parse ca failed, err: %+v", err))
+	}
+
+	cert, err := tls.X509KeyPair(certBytes, keyBytes)
+	if err != nil {
+		panic(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(caCertBytes)
+
+	return &tls.Config{
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      pool,
+	}
 }
