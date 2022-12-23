@@ -39,3 +39,10 @@ func WithClientTlsConfig(certFile, keyFile, caCertFile string) Option {
 		return
 	}
 }
+
+func WithEtcdV3Api() Option {
+	return func(cli *HTTPClient) error {
+		cli.KeyAdapter = V3Adapter
+		return nil
+	}
+}

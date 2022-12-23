@@ -1,25 +1,34 @@
 package watch
 
 import (
-	"github.com/panhow/etcd-proxy/etcd"
 	"github.com/panhow/etcd-proxy/util"
 	"go.uber.org/zap"
 )
 
 type Watcher struct {
-	key     string
-	ech     chan etcd.Result
-	hub     *WatcherHub
-	removed bool
-	remove  func()
+	key        string
+	headerChan chan *Result
+	ech        chan []byte
+	hub        *WatcherHub
+	removed    bool
+	remove     func()
 }
 
 func (w *Watcher) Key() string {
 	return w.key
 }
 
-func (w *Watcher) EventChannel() <-chan etcd.Result {
+func (w *Watcher) EventChannel() <-chan []byte {
 	return w.ech
+}
+
+func (w *Watcher) Header() *Result {
+	result := <-w.headerChan
+
+	close(w.headerChan)
+	w.headerChan = nil
+
+	return result
 }
 
 func (w *Watcher) Remove() {
@@ -32,11 +41,11 @@ func (w *Watcher) Remove() {
 	}
 }
 
-func (w *Watcher) notify(r etcd.Result) {
-	util.Logger.Info("prepare push message into channel", zap.String("key", w.key))
+func (w *Watcher) notify(r []byte) {
+	util.Logger.Debug("prepare push message into channel", zap.String("key", w.key))
 	select {
 	case w.ech <- r:
-		util.Logger.Info("done push message into channel", zap.String("key", w.key))
+		util.Logger.Debug("done push message into channel", zap.String("key", w.key))
 	default:
 		// We have missed a notification. Remove the watcher.
 		// Removing the watcher also closes the eventChan.

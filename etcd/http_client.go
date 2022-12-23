@@ -5,34 +5,25 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/panhow/etcd-proxy/util"
-	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"strings"
-	"sync/atomic"
 )
 
 type HTTPClient struct {
+	KeyAdapter  KeyAdapter
 	tlsConfig   *tls.Config
-	count       int64
 	endpoints   []string
 	cli         *http.Client
 	getEndpoint func() string
 }
 
-type Result struct {
-	Code   int
-	Header http.Header
-	Body   []byte
-	Error  error
-}
-
 func NewHTTPClient(endpoints []string, options ...Option) *HTTPClient {
 	index := 0
 	cli := &HTTPClient{
-		count:     0,
-		endpoints: endpoints,
+		KeyAdapter: V2Adapter,
+		endpoints:  endpoints,
 		getEndpoint: func() string {
 			e := endpoints[index]
 			index = (index + 1) % len(endpoints)
@@ -62,12 +53,14 @@ func NewHTTPClient(endpoints []string, options ...Option) *HTTPClient {
 	return cli
 }
 
-func (c *HTTPClient) Do(r *http.Request) (int, http.Header, io.Reader, error) {
-	var fail = func(err error) (int, http.Header, io.Reader, error) { return 0, nil, nil, err }
+func (c *HTTPClient) Do(r *http.Request) (int, http.Header, io.ReadCloser, error) {
+	var fail = func(err error) (int, http.Header, io.ReadCloser, error) { return 0, nil, nil, err }
 	outR := r.Clone(context.Background())
 
-	if outR.URL.Scheme == "" {
+	if c.tlsConfig == nil {
 		outR.URL.Scheme = "http"
+	} else {
+		outR.URL.Scheme = "https"
 	}
 	outR.URL.Host = c.getEndpoint()
 	outR.Close = false
@@ -85,21 +78,13 @@ func (c *HTTPClient) Do(r *http.Request) (int, http.Header, io.Reader, error) {
 		outR.Header.Del(h)
 	}
 
-	if _, ok := r.URL.Query()["wait"]; ok {
-		atomic.AddInt64(&c.count, 1)
-		util.Logger.Info("etcdClient new job", zap.Int64("total", c.count))
-		defer func() {
-			atomic.AddInt64(&c.count, -1)
-			util.Logger.Info("etcdClient done job", zap.Int64("total", c.count))
-		}()
-	}
 	res, err := c.cli.Transport.RoundTrip(outR)
 	if err != nil {
 		return fail(err)
 	}
-	defer func() {
-		res.Body.Close()
-	}()
+	//defer func() {
+	//	res.Body.Close()
+	//}()
 	removeConnectionHeaders(res.Header)
 	for _, h := range hopHeaders {
 		res.Header.Del(h)
