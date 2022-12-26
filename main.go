@@ -124,7 +124,7 @@ func direct(writer http.ResponseWriter, request *http.Request, retry int) {
 }
 
 func main() {
-	util.Logger.Info("serve start", zap.Int16("port", 5678), zap.Strings("endpoints", strings.Split(*endpoints, ",")))
+	util.Logger.Info("serve start", zap.String("listen_on ", *listen), zap.Strings("endpoints", strings.Split(*endpoints, ",")))
 
 	options := make([]etcd.Option, 0, 0)
 	if *clientTlsEnable {
