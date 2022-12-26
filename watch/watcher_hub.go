@@ -74,10 +74,10 @@ func (wh *WatcherHub) GetWatcher(request *http.Request) *Watcher {
 			Header: header,
 			Error:  err,
 		}
+		w.headerChan <- unit.headerResult
 		if err == nil {
 			wh.watchers[key] = unit
 			go func() {
-				w.headerChan <- unit.headerResult
 				r := bufio.NewReader(bodyReader)
 				for {
 					line, err := r.ReadBytes('\n')
@@ -117,7 +117,9 @@ func (wh *WatcherHub) GetWatcher(request *http.Request) *Watcher {
 				"all watchers removed",
 				zap.String("key", w.key),
 			)
-			_ = unit.body.Close()
+			if unit.body != nil {
+				_ = unit.body.Close()
+			}
 			util.Logger.Info("etcdClient done job", zap.String("key", key))
 			delete(wh.watchers, w.key)
 		}

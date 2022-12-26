@@ -48,16 +48,18 @@ func proxy(writer http.ResponseWriter, request *http.Request) {
 
 	// handle response headers
 	headerResponse := w.Header()
-	util.CopyHeader(writer.Header(), headerResponse.Header)
-	writer.WriteHeader(headerResponse.Code)
 
 	if err := headerResponse.Error; err != nil {
+		writer.WriteHeader(http.StatusInternalServerError)
 		_, err := writer.Write([]byte(err.Error()))
 		if err != nil {
 			util.Logger.Error("write error failed", zap.Error(err))
 		}
 		return
 	}
+
+	util.CopyHeader(writer.Header(), headerResponse.Header)
+	writer.WriteHeader(headerResponse.Code)
 
 HandleStreamingResponse:
 	for {
