@@ -158,29 +158,16 @@ func main() {
 }
 
 func buildTlsConfigFromFlag() *tls.Config {
-	certBytes, err := os.ReadFile(*cert)
-	if err != nil {
-		panic(fmt.Sprintf("parse cert failed, err: %+v", err))
-	}
-	keyBytes, err := os.ReadFile(*key)
-	if err != nil {
-		panic(fmt.Sprintf("parse key failed, err: %+v", err))
-	}
 	caCertBytes, err := os.ReadFile(*caCert)
 	if err != nil {
 		panic(fmt.Sprintf("parse ca failed, err: %+v", err))
 	}
 
-	cert, err := tls.X509KeyPair(certBytes, keyBytes)
-	if err != nil {
-		panic(err)
-	}
 	pool := x509.NewCertPool()
 	pool.AppendCertsFromPEM(caCertBytes)
 
 	return &tls.Config{
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      pool,
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  pool,
 	}
 }
